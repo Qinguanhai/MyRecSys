@@ -51,14 +51,14 @@ def summarizeItemSimList(simLists):
 
 
 if __name__ == "__main__":
-    conf = SparkConf().setAppName("UserCF").setMaster("local[*]")
+    conf = SparkConf().setAppName("itemCF").setMaster("local[*]")
     spark = SparkSession.builder.config(conf = conf).getOrCreate()
 
     ratingDataPath = "/Users/huangqiushi/Desktop/LearningRS/MyRecSys/Datas/ratings.csv"
     ratingRawSamples = spark.read.format("csv").option('header', 'true').load(ratingDataPath)
     training, test = ratingRawSamples.randomSplit((0.8, 0.2))
-    # training.printSchema()
-
+    
+    # Step 1: 聚合有共现关系的item pairs，以及他们的rating乘积，并聚合
     itemRatingPairs = training.withColumn("movieRatingPair", concat_ws(":", F.col("movieId"), F.col("rating"))) \
             .groupBy("userId") \
             .agg(udf(generateItemRatingPairs, ArrayType(StringType()))(F.collect_list("movieRatingPair")).alias("ItemPairs")) \
@@ -72,6 +72,7 @@ if __name__ == "__main__":
     itemRatingPairs.show()
     itemRatingPairs.printSchema()
 
+    # Step 2: 计算每个item norm 的平方 
     itemNorms = training.groupBy("movieId") \
             .agg(udf(generateItemRatingNormSquare, FloatType())(F.collect_list("rating")).alias("itemNorms"))
     
@@ -80,34 +81,29 @@ if __name__ == "__main__":
     
     itemNormsJoin2 = itemNorms.withColumnRenamed("movieId", "movieId2") \
                     .withColumnRenamed("itemNorms", "itemNorms2")
-    
-    itemNorms.show()
 
     itemRatingPairsJoin = itemRatingPairs.withColumn("movieIdHead", split(F.col("itemIdPair"), "_")[0]) \
                     .withColumn("movieIdTail", split(F.col("itemIdPair"), "_")[1])
     
+    # Step 3：计算item之间的cos
     itemPairCosRaw =  itemRatingPairsJoin.join(itemNormsJoin1, itemRatingPairsJoin.movieIdHead == itemNormsJoin1.movieId1, "left") \
                     .join(itemNormsJoin2, itemRatingPairsJoin.movieIdTail == itemNormsJoin2.movieId2, "left") \
                     .withColumn("cos", udf(calCosValue, FloatType())(F.col("itemPairProductSum"), F.col("itemNorms1"), F.col("itemNorms2"))) \
                     .select(F.col("movieIdHead"), F.col("movieIdTail"), F.col("cos")) \
                     .filter(F.col("cos") >= 0.3)
     
-    itemPairCosRaw.show()
-    itemPairCosRaw.printSchema()
     # spark中同时使用多个 collect_list() 时， 不同保证两个List 是同样的顺序，因此不可以像如下方法使用： 
     # itemPairCosHead = itemPairCosRaw.groupBy("movieIdHead") \
     #                     .agg(udf(summarizeItemSim, ArrayType(MapType(StringType(), FloatType())))(F.collect_list("movieIdTail"), F.collect_list("cos")).alias("simList"))
     # itemPairCosHead.show()
 
+    # Step 4：聚合相应的结果
     itemPairCosHead = itemPairCosRaw.groupBy("movieIdHead") \
                         .agg(F.collect_list(struct(F.col("movieIdTail"), F.col("cos"))).alias("simList"))
     
-    itemPairCosHead.show()
 
     itemPairCosTail = itemPairCosRaw.groupBy("movieIdTail") \
                         .agg(F.collect_list(struct(F.col("movieIdHead"), F.col("cos"))).alias("simList"))      
-    
-    itemPairCosTail.show()
 
     itemPairCosProcessed = itemPairCosHead.union(itemPairCosTail) \
                             .withColumnRenamed("movieIdHead", "movieId") \
