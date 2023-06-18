@@ -102,7 +102,27 @@ def extractGenres(genres_list):
 
 
 def addUserFeatures(samplesWithMovieFeatures):
+
     extractGenresUdf = udf(extractGenres, ArrayType(StringType()))
+
+    # 1) F.when(): when in pyspark multiple conditions can be built using &  (for and) and | (for or), 
+    #   it is important to enclose every expressions within parenthesis that combine to form the condition
+    #
+    # 2) F.when() 可以通过 "." 连用:
+    # dataDF.withColumn("new_column",
+    #   when((col("code") == "a") | (col("code") == "d"), "A")
+    #  .when((col("code") == "b") & (col("amt") == "4"), "B")
+    #  .otherwise("A1")).show()
+
+    # 1）userPositiveHistory: 用户最近100条的有正反馈的movieId
+    # 2）userRatedMoive1-5: 用户最近5个有正反馈的movieId
+    # 3）userRatingCount: 用户至今评价过了视频数，100条截断
+    # 4）userAvgReleaseYear, userReleaseYearStddev: 用户最近100条评价电影的发布年份和标准差 -> 冷启是否可以添加 用户最近消费正向的视频的新鲜度？来判断是否是一个适合发冷启的用户
+    # 5）userAvgRating, userRatingStddev: 用户最近100条评价的均值和方差 -> 我们现有的特征体系中是不是很缺少方差？
+    # 6) userGenres:  用户最近100条评价中好评的genre，按照genre出现的次数降序排序
+    # 7）userGenre1-5: 用户最近100条评价中好评的genre TOP 5
+    # 8）同时过滤除此评价的用户特征数据
+    
     samplesWithUserFeatures = samplesWithMovieFeatures \
         .withColumn('userPositiveHistory',
                     F.collect_list(when(F.col('label') == 1, F.col('movieId')).otherwise(F.lit(None))).over(
@@ -186,9 +206,10 @@ if __name__ == '__main__':
     # Step2: 拼接movie信息
     samplesWithMovieFeatures = addMovieFeatures(movieSamples, ratingSamplesWithLabel)
     
-    # samplesWithUserFeatures = addUserFeatures(samplesWithMovieFeatures)
+    # Step3: 拼接user信息
+    samplesWithUserFeatures = addUserFeatures(samplesWithMovieFeatures)
 
     # save samples as csv format
     # splitAndSaveTrainingTestSamples(samplesWithUserFeatures, file_path + "sampledata")
 
-    # splitAndSaveTrainingTestSamplesByTimeStamp(samplesWithUserFeatures, file_path + "sampledata")
+    splitAndSaveTrainingTestSamplesByTimeStamp(samplesWithUserFeatures, file_path + "sampledata")
