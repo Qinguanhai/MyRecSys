@@ -1,3 +1,6 @@
+# 一般来说，我们不会人为预设哪个特征有用，哪个特征无用，而是让模型自己去判断，如果一个特征的加入没有提升模型效果，我们再去除这个特征。
+# 就像我刚才虽然提取了不少特征，但并不是说每个模型都会使用全部的特征，而是根据模型结构、模型效果有针对性地部分使用它们。
+
 from pyspark import SparkContext, SparkConf
 from pyspark.sql import SparkSession
 import pyspark.sql as sql
